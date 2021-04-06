@@ -1,11 +1,11 @@
-AM_CPPFLAGS = -I$(top_srcdir)/src/ -include $(top_srcdir)/include/config.h
+AM_CPPFLAGS = -I$(top_srcdir)/src/ -include $(top_srcdir)/config.h
 
 bin_PROGRAMS = grepL
 
 grepL_CFLAGS = -Ofast
 
 source_files = \
-	src/grepl.c
+	src/grepL.c
 
 header_files =
 

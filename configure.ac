@@ -19,6 +19,14 @@ AM_PROG_AR
 AC_CONFIG_MACRO_DIRS([m4])
 
 
+AC_CHECK_LIB(rationl, regex_compile, [
+                AC_SUBST([CRITERION_LIBS])
+], [
+  AC_MSG_ERROR([Could not find library rationL - get it at https://github.com/TheNaturLFoundation/rationL])
+])
+
+
+
 AC_ARG_ENABLE([debug], AS_HELP_STRING([--enable-debug], [enable debug build]), [], [])
 AS_IF([test "$enable_debug" = "yes"], [
         AC_DEFINE([DEBUG], [1], [debug build])
