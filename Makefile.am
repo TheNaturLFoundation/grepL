@@ -4,6 +4,7 @@ bin_PROGRAMS = grepL
 
 grepL_CFLAGS = -Ofast -lrationl
 
+grepL_LDADD = -lrationl
 
 source_files = \
 	src/grepL.c
