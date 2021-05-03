@@ -2,7 +2,8 @@ AM_CPPFLAGS = -I$(top_srcdir)/src/ -include $(top_srcdir)/config.h
 
 bin_PROGRAMS = grepL
 
-grepL_CFLAGS = -Ofast
+grepL_CFLAGS = -Ofast -lrationl
+
 
 source_files = \
 	src/grepL.c
