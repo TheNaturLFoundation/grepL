@@ -19,6 +19,7 @@ typedef struct Options
     size_t occurences;
     char printlines;
     char entire_text;
+    char change_text;
 
 } Options;
 
@@ -29,6 +30,7 @@ Options *init_options()
     op->occurences = 0;
     op->printlines = 0;
     op->entire_text = 0;
+    op->change_text = 0;
 
     return op;
 }
@@ -38,18 +40,42 @@ void help()
     printf("Usage : grepL [OPTIONS]... PATTERN [FILE/FOLDER]\n");
     printf("\n Options\n");
     printf("   -h : display this help\n");
-    printf("   -r : recusive search\n");
+    printf("   -r : recursive search\n");
     printf("   -o : print the number of occurences of the regexp\n");
     printf("   -l : print line numbers\n");
     printf("   -e : print the entire text\n");
+    printf("   -c : change the regexp with the new string\n");
+    printf("        grepL -c PATTERN REPLACEMENT [FILE/FOLDER]\n");
 
+}
+
+
+void replace(char *path, reg_t regexp, char *text)
+{
+    FILE *f = fopen(path, "rb");
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *string = malloc(fsize + 1);
+    fread(string, 1, fsize, f);
+    fclose(f);
+    string[fsize] = 0;
+
+    char *new_text = regex_sub(regexp, string, text);
+    FILE *file = fopen(path, "w");
+    fputs(new_text, file);
+    fclose(file);
+    printf("done\n");
 }
 
 void search_lines(reg_t regexp, char *path, Options *options)
 {
     FILE *f = fopen(path, "r");
     if (f == NULL)
+    {
+        printf("invalid file path\n");
         return;
+    }
 
     ssize_t r = 0;
     size_t len = 0;
@@ -65,7 +91,7 @@ void search_lines(reg_t regexp, char *path, Options *options)
         if ((match_size = regex_search(regexp, line, &match_list)) != 0)
         {
             if (options->recursion)
-                    printf("\033[0;35m%s:"WHITE, path);
+                printf("\033[0;35m%s:"WHITE, path);
             if (options->printlines)
                 printf("\033[0;32m%i:"WHITE, line_number);
             options->occurences += match_size;
@@ -83,12 +109,14 @@ void search_lines(reg_t regexp, char *path, Options *options)
                 {
                     printf("%s", l);
                 }
+
             }
         }
         else if (options->entire_text)
             printf("%s", line);
         line_number++;
     }
+
     free(line);
 
     fclose(f);
@@ -130,17 +158,15 @@ int main(int argc, char **argv)
     Options *options = init_options();
     int opt;
 
-    if (argc <= 2)
+    if (argc <= 2 && !(argc == 2 && strcmp(argv[1], "-h") == 0))
     {
-        if (!(argc == 2 && strcmp(argv[1], "-h") == 0))
-        {
-            USAGE;
-            HELP;
-            return 0;
-        }
+        printf("missing arguments\n");
+        USAGE;
+        HELP;
+        return 0;
     }
 
-    while ((opt = getopt(argc, argv, "hrole")) != -1)
+    while ((opt = getopt(argc, argv, "hrolec:")) != -1)
     {
         switch (opt)
         {
@@ -160,6 +186,10 @@ int main(int argc, char **argv)
             case 'e':
                 options->entire_text = 1;
                 break;
+            case 'c':
+                options->change_text = optind-1;
+
+                break;
             case '?':
                 printf("unknown option %c\n", opt);
                 HELP;
@@ -169,14 +199,27 @@ int main(int argc, char **argv)
 
     if ((argc - optind) != 2)
     {
+        printf("missing arguments\n");
         USAGE;
         HELP;
+
+        if (options->change_text)
+        {
+            printf("After -c, indicate the new string:\n");
+            printf("    grepL -c PATTERN REPLACEMENT [FILE/FOLDER]\n");
+        }
         return 0;
     }
 
-    char occ = options->occurences;
-
     reg_t regexp = regex_compile(argv[optind]);
+
+    char occ = options->occurences;
+    if (options->change_text)
+    {
+        replace(argv[optind+1], regexp, argv[options->change_text]);
+        return 0;
+    }
+
     get_files(argv[optind + 1], regexp, options);
 
     regex_free(regexp);
