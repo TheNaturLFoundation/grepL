@@ -7,11 +7,19 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/mman.h>
 
 #define RED "\033[0;31m"
 #define WHITE "\033[0;37m"
 #define USAGE printf("Usage : grepL [OPTIONS]... PATTERN [FILE/FOLDER]\n")
 #define HELP printf("Try 'grepL -h' for more information\n")
+
+typedef struct FileLine
+{
+    unsigned int line_num;
+    char *line_content;
+} FileLine;
 
 typedef struct Options
 {
@@ -49,6 +57,65 @@ void help()
 
 }
 
+FileLine* getfilelines(char *file, int* total_lines)
+{
+    int fd;
+    char *lhs;
+    char *rhs;
+    char *cp;
+    int len;
+    int linecnt;
+    int linemax;
+    FileLine *linelist;
+    FileLine *line;
+    struct stat st;
+    char *fbuf;
+    char cbuf[50000];
+
+    fd = open(file,O_RDONLY);
+    if(fd == -1)
+        return NULL;
+
+    fstat(fd,&st);
+
+    fbuf = mmap(NULL,st.st_size,PROT_READ,MAP_PRIVATE,fd,0);
+
+    linecnt = 0;
+    linemax = 0;
+    linelist = NULL;
+
+    lhs = fbuf;
+    rhs = fbuf;
+
+    for (lhs = fbuf;  lhs < &fbuf[st.st_size];  lhs = rhs + 1) {
+        rhs = strchr(lhs,'\n');
+
+        if (rhs == NULL)
+            break;
+
+        len = rhs - lhs;
+
+        if ((linecnt + 1) > linemax) {
+            linemax += 100;
+            linelist = realloc(linelist,linemax * sizeof(FileLine));
+        }
+
+        line = &linelist[linecnt];
+        line->line_num = linecnt++;
+
+        cp = malloc(len + 1);
+        memcpy(cp,lhs,len);
+        cp[len] = 0;
+        line->line_content = cp;
+    }
+
+    munmap(fbuf,st.st_size);
+    close(fd);
+    *total_lines = linecnt;
+    linelist = realloc(linelist, linecnt * sizeof(FileLine));
+
+    return linelist;
+}
 
 void replace(char *path, reg_t regexp, char *text)
 {
@@ -70,56 +137,47 @@ void replace(char *path, reg_t regexp, char *text)
 
 void search_lines(reg_t regexp, char *path, Options *options)
 {
-    FILE *f = fopen(path, "r");
-    if (f == NULL)
+
+    int line_count = 0;
+    FileLine* lines = getfilelines(path, &line_count);
+    if(lines == NULL)
     {
-        printf("invalid file path\n");
+        printf("No such file or directory: %s\n", path);
         return;
     }
-
-    ssize_t r = 0;
-    size_t len = 0;
-    char *line = NULL;
-    int line_number = 0;
-
-    while ((r = getline(&line, &len, f)) != -1)
+    for (int i = 0; i < line_count; i++)
     {
         match **match_list;
         size_t match_size = 0;
         size_t position = 0;
-
-        if ((match_size = regex_search(regexp, line, &match_list)) != 0)
+        FileLine *line = lines + i;
+        if ((match_size = regex_search(regexp, line->line_content, &match_list)) != 0)
         {
             if (options->recursion)
                 printf("\033[0;35m%s:"WHITE, path);
             if (options->printlines)
-                printf("\033[0;32m%i:"WHITE, line_number);
+                printf("\033[0;32m%i:"WHITE, line->line_num);
             options->occurences += match_size;
-            char *l = line;
+            char *l = line->line_content;
             for (size_t i = 0; i < match_size; i++)
             {
                 match *match = match_list[i];
                 printf("%.*s", (int)(match->start - position), l);
-                l = line + match->start;
+                l = line->line_content + match->start;
                 position = match->start;
                 printf(RED "%.*s" WHITE, (int)(match->length), l);
                 l += match->length;
                 position += match->length;
                 if (i + 1 >= match_size)
                 {
-                    printf("%s", l);
+                    printf("%s\n", l);
                 }
 
             }
         }
         else if (options->entire_text)
-            printf("%s", line);
-        line_number++;
+            printf("%s\n", line->line_content);
     }
-
-    free(line);
-
-    fclose(f);
 }
 
 void get_files(char *path, reg_t regexp, Options *options)
