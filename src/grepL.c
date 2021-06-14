@@ -1,5 +1,5 @@
 #define _XOPEN_SOURCE 700
-
+#define _GNU_SOURCE 1
 #include <dirent.h>
 #include <err.h>
 #include <fcntl.h>
@@ -23,9 +23,11 @@ typedef struct Options
 {
     char recursion;
     size_t occurences;
-    char printlines;
+    char linenumber;
     char entire_text;
     char change_text;
+    char string;
+    char fast;
 
 } Options;
 
@@ -34,11 +36,13 @@ static reg_t regex;
 char buffer[1000] = {0};
 
 static Options option = {
-    .recursion = 0,
-    .occurences = 0,
-    .printlines = 0,
-    .entire_text = 0,
-    .change_text = 0,
+.recursion = 0,
+.occurences = 0,
+.linenumber = 0,
+.entire_text = 0,
+.change_text = 0,
+.string = 0,
+.fast = 0,
 };
 
 static pthread_mutex_t STDOUT_MUTEX = PTHREAD_MUTEX_INITIALIZER;
@@ -53,10 +57,12 @@ void help()
     printf("   -h : display this help\n");
     printf("   -r : recursive search\n");
     printf("   -o : print the number of occurences of the regexp\n");
-    printf("   -l : print line numbers\n");
+    printf("   -n : print line numbers\n");
     printf("   -e : print the entire text\n");
     printf("   -c : change the regexp with the new string\n");
     printf("        grepL -c PATTERN REPLACEMENT [FILE/FOLDER]\n");
+    printf("   -s : a string is given, not a regexp\n");
+    printf("   -f : fast. printf every occurence of the regexp. Disables the other options, except -s\n");
 }
 
 void replace(char *path, reg_t regexp, char *text)
@@ -77,17 +83,74 @@ void replace(char *path, reg_t regexp, char *text)
     printf("done\n");
 }
 
-/*
-void get_files(char *path, reg_t regexp, Options *options)
+void search_lines(reg_t regexp, char *path)
+{
+    FILE *f = fopen(path, "r");
+    if (f == NULL)
+    {
+        printf("invalid file path\n");
+        return;
+    }
+
+    ssize_t r = 0;
+    size_t len = 0;
+    char *line = NULL;
+    int line_number = 0;
+
+    while ((r = getline(&line, &len, f)) != -1)
+    {
+        match **match_list;
+        size_t match_size = 0;
+        size_t position = 0;
+
+        if ((match_size = regex_search(regexp, line, &match_list)) != 0)
+        {
+            if (option.recursion)
+                printf("\033[0;35m%s:"WHITE, path);
+            if (option.linenumber)
+                printf("\033[0;32m%i:"WHITE, line_number);
+            option.occurences += match_size;
+            char *l = line;
+            for (size_t i = 0; i < match_size; i++)
+            {
+                match *match = match_list[i];
+                printf("%.*s", (int)(match->start - position), l);
+                l = line + match->start;
+                position = match->start;
+                printf(RED "%.*s" WHITE, (int)(match->length), l);
+                l += match->length;
+                position += match->length;
+                if (i + 1 >= match_size)
+                {
+                    printf("%s", l);
+                }
+
+            }
+        }
+        else if (option.entire_text)
+        {
+            printf("\033[0;35m%s:"WHITE, path);
+            if (option.linenumber)
+                printf("\033[0;32m%i:"WHITE, line_number);
+            printf("%s", line);
+        }
+        line_number++;
+    }
+
+    free(line);
+
+    fclose(f);
+}
+
+void get_files(char *path, reg_t regexp)
 {
     DIR *d = opendir(path);
     if (d == NULL)
     {
-        search_lines(regexp, path, options);
+        search_lines(regexp, path);
         return;
     }
     struct dirent *dir;
-    int fd = open(file, O_RDONLY);
     while ((dir = readdir(d)) != NULL)
     {
         if (dir->d_type != DT_DIR)
@@ -95,22 +158,22 @@ void get_files(char *path, reg_t regexp, Options *options)
             char new_path[512];
             if (sprintf(new_path, "%s/%s", path, dir->d_name) == -1)
                 return;
-            search_lines(regexp, new_path, options);
+            search_lines(regexp, new_path);
         }
-        if (options->recursion && dir->d_type == DT_DIR
+        if (option.recursion && dir->d_type == DT_DIR
             && strcmp(dir->d_name, ".") != 0 && strcmp(dir->d_name, "..") != 0
             && dir->d_name[0] != '.')
         {
             char new_path[512];
             if (sprintf(new_path, "%s/%s", path, dir->d_name) == -1)
                 return;
-            get_files(new_path, regexp, options);
+            get_files(new_path, regexp);
         }
     }
     closedir(d);
 }
 
-*/
+
 
 struct file_data
 {
@@ -145,10 +208,6 @@ void *read_file(void *data)
             if (option.recursion)
             {
                 printf("%s:", d->path);
-            }
-            if (option.printlines)
-            {
-                printf("033[0;32m%i:" WHITE, 2);
             }
             match *match = match_list[i];
             printf(RED "%.*s\n" WHITE, (int)(match->length),
@@ -200,34 +259,39 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    while ((opt = getopt(argc, argv, "hrolec:")) != -1)
+    while ((opt = getopt(argc, argv, "hronec:sf")) != -1)
     {
         switch (opt)
         {
-        case 'h':
-            help();
-            return 0;
-            break;
-        case 'r':
-            option.recursion = 1;
-            break;
-        case 'o':
-            option.occurences = 1;
-            break;
-        case 'l':
-            option.printlines = 1;
-            break;
-        case 'e':
-            option.entire_text = 1;
-            break;
-        case 'c':
-            option.change_text = optind - 1;
-
-            break;
-        case '?':
-            printf("unknown option %c\n", opt);
-            HELP;
-            break;
+            case 'h':
+                help();
+                return 0;
+                break;
+            case 'r':
+                option.recursion = 1;
+                break;
+            case 'o':
+                option.occurences = 1;
+                break;
+            case 'n':
+                option.linenumber = 1;
+                break;
+            case 'e':
+                option.entire_text = 1;
+                break;
+            case 'c':
+                option.change_text = optind - 1;
+                break;
+            case 's':
+                option.string = 1;
+                break;
+            case 'f':
+                option.fast = 1;
+                break;
+            case '?':
+                printf("unknown option %c\n", opt);
+                HELP;
+                break;
         }
     }
 
@@ -245,17 +309,26 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    regex = regex_compile(argv[optind]);
+    if (option.string)
+        regex = regexp_compile_string(argv[optind]);
+    else
+        regex = regex_compile(argv[optind]);
+
     char occ = option.occurences;
+
     if (option.change_text)
     {
         replace(argv[optind + 1], regex, argv[option.change_text]);
         return 0;
     }
-    if (option.recursion)
+
+    if (option.fast)
     {
         recurse_directories(argv[optind + 1]);
     }
+    else
+        get_files(argv[optind+1], regex);
+
     option.occurences--;
     if (occ)
         printf("%li occurences\n", option.occurences);
