@@ -286,6 +286,7 @@ int main(int argc, char **argv)
                 option.string = 1;
                 break;
             case 'f':
+                option.recursion = 1;
                 option.fast = 1;
                 break;
             case '?':
@@ -308,6 +309,11 @@ int main(int argc, char **argv)
         }
         return 0;
     }
+
+    DIR *d = opendir(argv[optind+1]);
+    if (d != NULL)
+        option.recursion = 1;
+    closedir(d);
 
     if (option.string)
         regex = regexp_compile_string(argv[optind]);
